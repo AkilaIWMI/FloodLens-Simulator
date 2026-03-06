@@ -39,9 +39,9 @@ from dmc_scraper import fetch_listing, download_pdf, extract_table_from_pdf
 
 RIVER_FILTER = "Kelani Ganga"
 
-# Columns to drop from the raw extraction output (they are either redundant
-# with our new `date` column or add noise we don't need).
-DROP_COLUMNS = {"report_title", "report_time", "report_date"}
+# Columns to drop from the raw extraction output (redundant with our `date` column).
+# NOTE: report_time is kept — it distinguishes multiple reports on the same day.
+DROP_COLUMNS = {"report_title", "report_date"}
 
 
 # ---------------------------------------------------------------------------

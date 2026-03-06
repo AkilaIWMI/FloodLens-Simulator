@@ -115,6 +115,78 @@ def download_pdf(url: str) -> bytes:
     return resp.content
 
 
+# ---------------------------------------------------------------------------
+# Column normalisation helpers
+# ---------------------------------------------------------------------------
+
+# Positional columns that pdfplumber often fails to label (multi-line headers).
+# These positions are stable across all DMC water-level PDF reports.
+POSITIONAL_COLUMN_MAP: dict[int, str] = {
+    0: "River Basin",
+    1: "Tributory/River",
+    2: "Gauging Station",
+    3: "Unit",
+    4: "Alert Level",
+    5: "Minor Flood Level",
+    6: "Major Flood Level",
+}
+
+# Regex patterns for the time-varying water-level / rainfall columns.
+# We normalise them into generic names so every report produces the same schema.
+_WL_RE = re.compile(r"water\s*level", re.I)
+_RF_RE = re.compile(r"(rf|rainfall)\s*in\s*mm", re.I)
+
+
+def _normalise_headers(raw_headers: list[str], num_cols: int) -> list[str]:
+    """
+    Build a clean, consistent header list.
+
+    Strategy:
+    1. Use the positional map for columns 0-6 (always the same in DMC PDFs).
+    2. Scan the remaining columns for water-level / rainfall patterns and
+       assign generic names: Water Level 1, Water Level 2, Rainfall.
+    3. Keep Remarks and Rising/Falling as-is.
+    4. Mark anything left over as _drop (to be removed later).
+    """
+    headers: list[str] = []
+    wl_counter = 0
+    rf_counter = 0
+
+    for i in range(num_cols):
+        # --- positional columns (0-6) ---
+        if i in POSITIONAL_COLUMN_MAP:
+            headers.append(POSITIONAL_COLUMN_MAP[i])
+            continue
+
+        raw = raw_headers[i] if i < len(raw_headers) else ""
+        raw_clean = re.sub(r"\s+", " ", (raw or "")).strip()
+        raw_lower = raw_clean.lower()
+
+        if "remarks" in raw_lower:
+            headers.append("Remarks")
+        elif "rising" in raw_lower or "falling" in raw_lower:
+            headers.append("Water Level Rising or Falling")
+        elif _WL_RE.search(raw_clean):
+            wl_counter += 1
+            headers.append(f"Water Level {wl_counter}")
+        elif _RF_RE.search(raw_clean):
+            rf_counter += 1
+            headers.append(f"Rainfall {rf_counter}" if rf_counter > 1 else "Rainfall")
+        elif raw_clean:
+            # Keep any other legitimately named column
+            headers.append(raw_clean)
+        else:
+            headers.append(f"_drop_{i}")
+
+    return headers
+
+
+def _is_subheader_row(row: list[str]) -> bool:
+    """Return True if the row looks like a repeated sub-header (Unit, Alert Level …)."""
+    text = " ".join((c or "") for c in row).lower()
+    return "unit" in text and ("alert" in text or "flood" in text)
+
+
 def extract_table_from_pdf(pdf_bytes: bytes) -> list[dict]:
     """Extract water level table data from a PDF."""
     records = []
@@ -137,30 +209,37 @@ def extract_table_from_pdf(pdf_bytes: bytes) -> list[dict]:
                         break
 
                 if header_row is None:
-                    # Try using the first row as header
                     header_row = table[0]
                     header_idx = 0
 
-                # Clean header names
-                headers = []
-                for h in header_row:
-                    h = (h or "").strip()
-                    # Collapse whitespace
-                    h = re.sub(r"\s+", " ", h)
-                    headers.append(h)
+                # Clean raw header strings
+                raw_headers = [
+                    re.sub(r"\s+", " ", (h or "")).strip() for h in header_row
+                ]
+
+                # Determine actual column count from widest row
+                num_cols = max(len(r) for r in table)
+
+                # Build normalised headers
+                headers = _normalise_headers(raw_headers, num_cols)
 
                 # Process data rows
                 for row in table[header_idx + 1 :]:
                     if not row or all(not (cell or "").strip() for cell in row):
                         continue
 
+                    if _is_subheader_row(row):
+                        continue
+
                     record = {}
                     for j, cell in enumerate(row):
                         if j < len(headers):
-                            key = headers[j] if headers[j] else f"col_{j}"
+                            key = headers[j]
+                            if key.startswith("_drop_"):
+                                continue
                             record[key] = (cell or "").strip()
 
-                    # Skip rows that look like sub-headers or empty
+                    # Skip rows with too few values
                     values = [v for v in record.values() if v]
                     if len(values) < 3:
                         continue
