@@ -176,10 +176,13 @@ def main():
     if start_date > end_date:
         print("Error: --start-date must be on or before --end-date.")
         sys.exit(1)
+    
+    output_dir = Path("output")
+    output_dir.mkdir(exist_ok=True)
 
     output_file = Path(
-        args.output
-        or f"kelani_ganga_{args.start_date}_to_{args.end_date}.csv"
+         args.output
+         or output_dir / f"kelani_ganga_{args.start_date}_to_{args.end_date}.csv"
     )
 
     # ---- Checkpoint: find already-processed dates ----
@@ -238,7 +241,7 @@ def main():
     # ---- Summary ----
     print(f"\nDone! Output saved to: {output_file}")
     if output_file.exists():
-        df_final = pd.read_csv(output_file)
+        df_final = pd.read_csv(output_file, on_bad_lines="warn")
         print(f"Total rows in CSV : {len(df_final)}")
         print(f"Dates covered     : {df_final['date'].nunique()}")
         print(f"\nPreview (first 5 rows):\n")
