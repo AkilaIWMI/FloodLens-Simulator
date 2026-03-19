@@ -1,0 +1,100 @@
+{
+  "timezone": "Asia/Colombo",
+  "dag": [
+    ["start_dag", "create_cluster", "dmc_scrape", "preprocess_data", "ga_extreme_search", "ga_hydrograph_sim", "delete_cluster", "end_dag"]
+  ],
+  "tasks": {
+    "start_dag": {
+      "type": "DUMMY"
+    },
+    "end_dag": {
+      "type": "DUMMY"
+    },
+    "create_cluster": {
+      "type": "CLUSTER-CREATE",
+      "args": {
+        "projectId": "e-rewater-prod",
+        "region": "asia-south1",
+        "clusterName": "flood-lens-cluster",
+        "clusterConfig": {
+          "masterMachineType": "n1-standard-4",
+          "workerMachineType": "n1-standard-4",
+          "numWorkers": 2,
+          "secondaryWorkers": 1,
+          "masterDiskType": "pd-standard",
+          "workerDiskType": "pd-standard",
+          "workerDiskSize": 100,
+          "masterDiskSize": 100,
+          "subnetworkUri": "e-rewater-subnet-1",
+          "imageVersion": "2.1-ubuntu20",
+          "serviceAccount": "composer@e-rewater-prod.iam.gserviceaccount.com",
+          "InitActions": [
+            "gs://e-rewater-dataprod-init-actions-bucket/pip-install/pip-install.sh",
+            "gs://e-rewater-dataprod-init-actions-bucket/set_timezone.sh"
+          ],
+          "bucketName": "asia-south1-e-rewater-prod-f470d83d-bucket",
+          "metadata": {
+            "PIP_PACKAGES": "requests beautifulsoup4 pdfplumber pandas google-cloud-storage numpy geneticalgorithm2 scikit-learn matplotlib seaborn",
+            "TIMEZONE": "Asia/Colombo"
+          },
+          "optional_components": ["JUPYTER"],
+          "enable_component_gateway": "True"
+        }
+      }
+    },
+    "delete_cluster": {
+      "type": "CLUSTER-DELETE",
+      "args": {
+        "clusterName": "flood-lens-cluster"
+      }
+    },
+    "dmc_scrape": {
+      "type": "PYSPARK",
+      "clusterName": "flood-lens-cluster",
+      "pyspark_file_path": "dmc_scraper.py",
+      "args": {
+        "--gcs_output_path": "gs://flood-lens/water_level/{{ dag_run.data_interval_end.astimezone(dag.timezone).strftime('%Y-%m-%d') }}/water_level.csv",
+        "--base_url": "https://www.dmc.gov.lk",
+        "--listing_url": "https://www.dmc.gov.lk/index.php?option=com_dmcreports&view=reports&report_type_id=6&Itemid=277&lang=en"
+      }
+    },
+    "preprocess_data": {
+      "type": "PYSPARK",
+      "clusterName": "flood-lens-cluster",
+      "pyspark_file_path": "preprocessing.py",
+      "args": {
+        "--gcs_input_path": "gs://flood-lens/water_level/{{ dag_run.data_interval_end.astimezone(dag.timezone).strftime('%Y-%m-%d') }}/water_level.csv",
+        "--gcs_output_path": "gs://flood-lens/processed/{{ dag_run.data_interval_end.astimezone(dag.timezone).strftime('%Y-%m-%d') }}/glencourse_data.csv"
+      }
+    },
+    "ga_extreme_search": {
+      "type": "PYSPARK",
+      "clusterName": "flood-lens-cluster",
+      "pyspark_file_path": "ga_flood.py",
+      "file_uris": [
+        "spark/params.py",
+        "spark/fitness.py",
+        "spark/callbacks.py"
+      ],
+      "args": {
+        "--gcs_input_path": "gs://flood-lens/processed/{{ dag_run.data_interval_end.astimezone(dag.timezone).strftime('%Y-%m-%d') }}/glencourse_data.csv",
+        "--gcs_output_path": "gs://flood-lens/results/{{ dag_run.data_interval_end.astimezone(dag.timezone).strftime('%Y-%m-%d') }}/extreme_scenarios/nvidia_sim_input.json",
+        "--n_scenarios": "5"
+      }
+    },
+    "ga_hydrograph_sim": {
+      "type": "PYSPARK",
+      "clusterName": "flood-lens-cluster",
+      "pyspark_file_path": "flood_simulator_v2.py",
+      "file_uris": [
+        "spark/params.py",
+        "spark/fitness.py"
+      ],
+      "args": {
+        "--gcs_input_path": "gs://flood-lens/processed/{{ dag_run.data_interval_end.astimezone(dag.timezone).strftime('%Y-%m-%d') }}/glencourse_data.csv",
+        "--gcs_output_path": "gs://flood-lens/results/{{ dag_run.data_interval_end.astimezone(dag.timezone).strftime('%Y-%m-%d') }}/hydrographs/",
+        "--water_levels": "8.43 15.0 17.0 19.5 21.7 25.0 30.0"
+      }
+    }
+  }
+}

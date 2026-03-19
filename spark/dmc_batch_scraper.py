@@ -16,8 +16,8 @@ Features
 
 Usage
 -----
-    python dmc_batch_scraper.py --start-date 2025-01-01 --end-date 2025-12-12
-    python dmc_batch_scraper.py --start-date 2025-01-01 --end-date 2025-12-12 --output my_data.csv
+    spark dmc_batch_scraper.py --start-date 2025-01-01 --end-date 2025-12-12
+    spark dmc_batch_scraper.py --start-date 2025-01-01 --end-date 2025-12-12 --output my_data.csv
 """
 
 import argparse
